@@ -1,411 +1,318 @@
 #!/usr/bin/env node
 
-const http = require("http");
-const axios = require("axios");
+const fs = require('fs');
+const path = require('path');
 const os = require('os');
-const fs = require("fs");
-const path = require("path");
+const axios = require('axios');
 const crypto = require('crypto');
-const { promisify } = require('util');
-const { exec: execCommand, execSync } = require('child_process');
-const exec = promisify(execCommand);
+const { exec, execSync } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
 
-const UPLOAD_URL = process.env.UPLOAD_URL || '';      // 节点或订阅自动上传地址,需填写部署Merge-sub项目后的首页地址,例如：https://merge.xxx.com
-const PROJECT_URL = process.env.PROJECT_URL || '';    // 需要上传订阅或保活时需填写项目分配的url,例如：https://google.com
-const AUTO_ACCESS = process.env.AUTO_ACCESS || false; // false关闭自动保活，true开启,需同时填写PROJECT_URL变量
-const FILE_PATH = process.env.FILE_PATH || '.npm';    // 运行目录,sub节点文件保存目录
-const SUB_PATH = process.env.SUB_PATH || 'wxy';       // 订阅路径
-const PORT = process.env.SERVER_PORT || process.env.PORT || 3000;        // http服务订阅端口
-const UUID = process.env.UUID || '0f0bd7ae-d750-48cf-ace0-d8cf3d5b23f9'; // 使用哪吒v1,在不同的平台运行需修改UUID,否则会覆盖
-const NEZHA_SERVER = process.env.NEZHA_SERVER || '';        // 哪吒v1填写形式: nz.abc.com:8008  哪吒v0填写形式：nz.abc.com
-const NEZHA_PORT = process.env.NEZHA_PORT || '';            // 使用哪吒v1请留空，哪吒v0需填写
-const NEZHA_KEY = process.env.NEZHA_KEY || '';              // 哪吒v1的NZ_CLIENT_SECRET或哪吒v0的agent密钥
-const ARGO_DOMAIN = process.env.ARGO_DOMAIN || 'dcdeploy.723207.xyz';          // 固定隧道域名,留空即启用临时隧道
-const ARGO_AUTH = process.env.ARGO_AUTH || 'eyJhIjoiMjg3NjVhODMwYmI1ZmIzYzYzMGFkMTVmZDA5MzYxZDciLCJ0IjoiMDNjM2Q0NTgtMWNhMi00ZDY3LWI3OWItMWM2YzhlZWNjODRhIiwicyI6Ill6WmxaamRpTVRrdE9XRXdPQzAwT0dVNUxXRTVOamd0WkRZek16ZzFNV0V6WWpRdyJ9';              // 固定隧道密钥json或token,留空即启用临时隧道,json获取地址：https://json.zone.id
-const ARGO_PORT = process.env.ARGO_PORT || 8001;            // 固定隧道端口,使用token需在cloudflare后台设置和这里一致
-const S5_PORT = process.env.S5_PORT || '';                  // socks5端口，支持多端口的可以填写，否则留空
-const HY2_PORT = process.env.HY2_PORT || '';                // hy2端口，支持多端口的可以填写，否则留空
-const REALITY_PORT = process.env.REALITY_PORT || '';        // reality端口，支持多端口的可以填写，否则留空
-const CFIP = process.env.CFIP || 'saas.sin.fan';            // 节点优选域名或优选ip
-const CFPORT = process.env.CFPORT || 443;                   // 节点优选域名或优选ip对应的端口
-const NAME = process.env.NAME || '';                        // 节点名称
-const CHAT_ID = process.env.CHAT_ID || '';                  // Telegram chat_id  两个变量不全不推送节点到TG
-const BOT_TOKEN = process.env.BOT_TOKEN || '';              // Telegram bot_token 两个变量不全不推送节点到TG
-const SHOW_LOG = !['false', 'disable', 'no'].includes((process.env.SHOW_LOG || 'true').toLowerCase()); // 是否显示日志输出，true/yes显示，false/disable/no屏蔽，默认显示
+// ==================== 环境变量 ====================
 
-// 控制日志输出
-if (!SHOW_LOG) {
-  console.log = () => {};
-  console.error = () => {};
-}
+const UPLOAD_URL = process.env.UPLOAD_URL || '';
+const PROJECT_URL = process.env.PROJECT_URL || '';
+const AUTO_ACCESS = process.env.AUTO_ACCESS || '';
+const FILE_PATH = process.env.FILE_PATH || './';
+const SUB_PATH = process.env.SUB_PATH || 'sub';
+const PORT = process.env.PORT || 3000;
 
-function alwaysLog(msg) {
-  process.stdout.write(msg + '\n');
-}
+const UUID = process.env.UUID || crypto.randomUUID();
 
-// 创建运行文件夹
-if (!fs.existsSync(FILE_PATH)) {
-  fs.mkdirSync(FILE_PATH);
-} else {
-}
+const NEZHA_SERVER = process.env.NEZHA_SERVER || '';
+const NEZHA_PORT = process.env.NEZHA_PORT || '';
+const NEZHA_KEY = process.env.NEZHA_KEY || '';
 
-// 端口检查
+const ARGO_DOMAIN = process.env.ARGO_DOMAIN || '';
+const ARGO_AUTH = process.env.ARGO_AUTH || '';
+const ARGO_PORT = process.env.ARGO_PORT || 8001;
+
+const S5_PORT = process.env.S5_PORT || '';
+const HY2_PORT = process.env.HY2_PORT || '';
+const REALITY_PORT = process.env.REALITY_PORT || '';
+
+const CFIP = process.env.CFIP || '';
+const CFPORT = process.env.CFPORT || 443;
+
+const NAME = process.env.NAME || '';
+const CHAT_ID = process.env.CHAT_ID || '';
+const BOT_TOKEN = process.env.BOT_TOKEN || '';
+const SHOW_LOG = process.env.SHOW_LOG || 'false';
+
+// ==================== 文件路径 ====================
+
+const webName = 'web';
+const botName = 'bot';
+
+const webPath = path.join(FILE_PATH, webName);
+const botPath = path.join(FILE_PATH, botName);
+
+const npmPath = path.join(FILE_PATH, 'npm');
+const phpPath = path.join(FILE_PATH, 'php');
+
+const configPath = path.join(FILE_PATH, 'config.json');
+const certPath = path.join(FILE_PATH, 'cert.pem');
+const keyPath = path.join(FILE_PATH, 'key.pem');
+
+const subPath = path.join(FILE_PATH, SUB_PATH);
+
+const bootLogPath = path.join(FILE_PATH, 'boot.log');
+
+// ==================== 基础函数 ====================
+
 function isValidPort(port) {
+  const p = parseInt(port);
+  return Number.isInteger(p) && p > 0 && p <= 65535;
+}
+
+function randomString(length = 8) {
+  const chars =
+    'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+  let result = '';
+
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+
+  return result;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function getArchitecture() {
+  const arch = os.arch();
+
+  if (arch === 'arm64' || arch === 'aarch64') {
+    return 'arm';
+  }
+
+  return 'amd64';
+}
+
+// ==================== 生成 Reality 密钥 ====================
+
+function generateRealityKeyPair() {
   try {
-    if (port === null || port === undefined || port === '') return false;
-    if (typeof port === 'string' && port.trim() === '') return false;
-    const portNum = parseInt(port);
-    if (isNaN(portNum)) return false;
-    if (portNum < 1 || portNum > 65535) return false;
+    const result = execSync(
+      `${webPath} x25519`,
+      {
+        encoding: 'utf8',
+        timeout: 10000
+      }
+    );
+
+    const lines = result
+      .split('\n')
+      .map(x => x.trim())
+      .filter(Boolean);
+
+    let privateKey = '';
+    let publicKey = '';
+
+    for (const line of lines) {
+      if (/PrivateKey/i.test(line)) {
+        privateKey = line.split(':').slice(1).join(':').trim();
+      }
+
+      if (/Password/i.test(line) && !publicKey) {
+        publicKey = line.split(':').slice(1).join(':').trim();
+      }
+
+      if (/PublicKey/i.test(line)) {
+        publicKey = line.split(':').slice(1).join(':').trim();
+      }
+    }
+
+    return {
+      privateKey,
+      publicKey
+    };
+  } catch (error) {
+    return {
+      privateKey: '',
+      publicKey: ''
+    };
+  }
+}
+
+let privateKey = '';
+let publicKey = '';
+
+function initRealityKeys() {
+  if (!isValidPort(REALITY_PORT)) {
+    return;
+  }
+
+  const keys = generateRealityKeyPair();
+
+  privateKey = keys.privateKey;
+  publicKey = keys.publicKey;
+
+  if (!privateKey) {
+    try {
+      const result = execSync(
+        `${webPath} x25519`,
+        {
+          encoding: 'utf8'
+        }
+      );
+
+      const matchPrivate = result.match(
+        /PrivateKey:\s*([A-Za-z0-9+/=_-]+)/
+      );
+
+      const matchPublic = result.match(
+        /PublicKey:\s*([A-Za-z0-9+/=_-]+)/
+      );
+
+      if (matchPrivate) {
+        privateKey = matchPrivate[1];
+      }
+
+      if (matchPublic) {
+        publicKey = matchPublic[1];
+      }
+    } catch (error) {
+      console.log('Reality key generation failed');
+    }
+  }
+}
+
+// ==================== 下载文件 ====================
+
+async function downloadFile(url, destination) {
+  try {
+    const response = await axios({
+      method: 'GET',
+      url,
+      responseType: 'arraybuffer',
+      timeout: 30000
+    });
+
+    fs.writeFileSync(destination, response.data);
+
+    try {
+      fs.chmodSync(destination, 0o755);
+    } catch (error) {
+      // Windows ignore
+    }
+
     return true;
   } catch (error) {
+    console.error(`Download failed: ${url}`);
     return false;
   }
 }
 
-// 生成随机6位字符
-function generateRandomName() {
-  const characters = 'abcdefghijklmnopqrstuvwxyz';
-  let result = '';
-  for (let i = 0; i < 6; i++) {
-    result += characters.charAt(Math.floor(Math.random() * characters.length));
-  }
-  return result;
-}
+// ==================== 获取服务器信息 ====================
 
-// 全局常量
-let subContent = null;
-let privateKey = '';
-let publicKey = '';
-
-const npmName = generateRandomName();
-const webName = generateRandomName();
-const botName = generateRandomName();
-const phpName = generateRandomName();
-
-let npmPath = path.join(FILE_PATH, npmName);
-let phpPath = path.join(FILE_PATH, phpName);
-let webPath = path.join(FILE_PATH, webName);
-let botPath = path.join(FILE_PATH, botName);
-
-let subPath = path.join(FILE_PATH, 'sub.txt');
-let listPath = path.join(FILE_PATH, 'list.txt');
-let bootLogPath = path.join(FILE_PATH, 'boot.log');
-let configPath = path.join(FILE_PATH, 'config.json');
-let certPath = path.resolve(FILE_PATH, 'cert.pem');
-let keyPath = path.resolve(FILE_PATH, 'private.key');
-
-// 如果订阅器上存在历史运行节点则先删除
-function deleteNodes() {
+async function getMetaInfo() {
   try {
-    if (!UPLOAD_URL) return;
-    if (!fs.existsSync(subPath)) return;
-
-    let fileContent;
-
-    try {
-      fileContent = fs.readFileSync(subPath, 'utf-8');
-    } catch {
-      return null;
-    }
-
-    const decoded = Buffer.from(fileContent, 'base64').toString('utf-8');
-
-    const nodes = decoded.split('\n').filter(line =>
-      /(vless|vmess|trojan|hysteria2|socks):\/\//.test(line)
-    );
-
-    if (nodes.length === 0) return;
-
-    axios.post(
-      `${UPLOAD_URL}/api/delete-nodes`,
-      JSON.stringify({ nodes }),
+    const response = await axios.get(
+      'https://ipinfo.io/json',
       {
-        headers: {
-          'Content-Type': 'application/json'
-        }
+        timeout: 5000
       }
-    ).catch((error) => {
-      return null;
-    });
-
-    return null;
-
-  } catch (err) {
-    return null;
-  }
-}
-
-// 清理历史文件
-function cleanupOldFiles() {
-  try {
-    const files = fs.readdirSync(FILE_PATH);
-
-    files.forEach(file => {
-      const filePath = path.join(FILE_PATH, file);
-
-      try {
-        const stat = fs.statSync(filePath);
-
-        if (stat.isFile()) {
-          fs.unlinkSync(filePath);
-        }
-
-      } catch (err) {
-        // 忽略所有错误，不记录日志
-      }
-    });
-
-  } catch (err) {
-    // 忽略所有错误，不记录日志
-  }
-}
-
-// crypto 生成 X25519 密钥对
-function generateX25519Keypair() {
-  const {
-    publicKey: pubKey,
-    privateKey: privKey
-  } = crypto.generateKeyPairSync('x25519');
-
-  const privateKeyRaw = privKey
-    .export({
-      type: 'pkcs8',
-      format: 'der'
-    })
-    .subarray(-32);
-
-  const publicKeyRaw = pubKey
-    .export({
-      type: 'spki',
-      format: 'der'
-    })
-    .subarray(-32);
-
-  return {
-    privateKey: privateKeyRaw.toString('base64url'),
-    publicKey: publicKeyRaw.toString('base64url')
-  };
-}
-
-// X25519 密钥对生成或加载
-function generateOrLoadKeyPair() {
-  const keyFilePath = path.join(FILE_PATH, 'key.txt');
-
-  if (fs.existsSync(keyFilePath)) {
-
-    const content = fs.readFileSync(
-      keyFilePath,
-      'utf8'
-    );
-
-    const privateKeyMatch = content.match(
-      /PrivateKey:\s*(.*)/
-    );
-
-    const publicKeyMatch = content.match(
-      /PublicKey:\s*(.*)/
-    );
-
-    if (privateKeyMatch && publicKeyMatch) {
-
-      privateKey = privateKeyMatch[1].trim();
-      publicKey = publicKeyMatch[1].trim();
-
-      console.log(
-        'Private Key:',
-        privateKey
-      );
-
-      console.log(
-        'Public Key:',
-        publicKey
-      );
-
-      return;
-    }
-  }
-
-  const keypair = generateX25519Keypair();
-
-  privateKey = keypair.privateKey;
-  publicKey = keypair.publicKey;
-
-  fs.writeFileSync(
-    keyFilePath,
-    `PrivateKey: ${privateKey}\nPublicKey: ${publicKey}\n`,
-    'utf8'
-  );
-
-  console.log(
-    'Private Key:',
-    privateKey
-  );
-
-  console.log(
-    'Public Key:',
-    publicKey
-  );
-}
-
-// TLS 证书生成
-const FALLBACK_EC_KEY =
-  '-----BEGIN EC PARAMETERS-----\n' +
-  'BggqhkjOPQMBBw==\n' +
-  '-----END EC PARAMETERS-----\n' +
-  '-----BEGIN EC PRIVATE KEY-----\n' +
-  'MHcCAQEEIM4792SEtPqIt1ywqTd/0bYidBqpYV/++siNnfBYsdUYoAoGCCqGSM49\n' +
-  'AwEHoUQDQgAE1kHafPj07rJG+HboH2ekAI4r+e6TL38GWASANnngZreoQDF16ARa\n' +
-  '/TsyLyFoPkhLxSbehH/NBEjHtSZGaDhMqQ==\n' +
-  '-----END EC PRIVATE KEY-----\n';
-
-const FALLBACK_CERT =
-  '-----BEGIN CERTIFICATE-----\n' +
-  'MIIBejCCASGgAwIBAgIUfWeQL3556PNJLp/veCFxGNj9crkwCgYIKoZIzj0EAwIw\n' +
-  'EzERMA8GA1UEAwwIYmluZy5jb20wHhcNMjUwOTE4MTgyMDIyWhcNMzUwOTE2MTgy\n' +
-  'MDIyWjATMREwDwYDVQQDDAhiaW5nLmNvbTBZMBMGByqGSM49AgEGCCqGSM49AwEH\n' +
-  'A0IABNZB2nz49O6yRvh26B9npACOK/nuky9/BlgEgDZ54Ga3qEAxdegEWv07Mi8h\n' +
-  'aD5IS8Um3oR/zQRIx7UmRmg4TKmjUzBRMB0GA1UdDgQWBBTV1cFID7UISE7PLTBR\n' +
-  'BfGbgkrMNzAfBgNVHSMEGDAWgBTV1cFID7UISE7PLTBRBfGbgkrMNzAPBgNVHRMB\n' +
-  'Af8EBTADAQH/MAoGCCqGSM49BAMCA0cAMEQCIAIDAJvg0vd/ytrQVvEcSm6XTlB+\n' +
-  'eQ6OFb9LbLYL9f+sAiAffoMbi4y/0YUSlTtz7as9S8/lciBF5VCUoVIKS+vX2g==\n' +
-  '-----END CERTIFICATE-----\n';
-
-function ensureTlsCertificates(certPath, keyPath) {
-
-  if (
-    fs.existsSync(certPath) &&
-    fs.existsSync(keyPath)
-  ) {
-    return;
-  }
-
-  fs.mkdirSync(
-    path.dirname(certPath),
-    {
-      recursive: true
-    }
-  );
-
-  try {
-
-    execSync(
-      'openssl version',
-      {
-        stdio: 'ignore'
-      }
-    );
-
-    execSync(
-      `openssl ecparam -genkey -name prime256v1 -out "${keyPath}"`,
-      {
-        stdio: 'ignore'
-      }
-    );
-
-    execSync(
-      `openssl req -new -x509 -days 3650 -key "${keyPath}" -out "${certPath}" -subj "/CN=bing.com"`,
-      {
-        stdio: 'ignore'
-      }
-    );
-
-    return;
-
-  } catch (e) {
-    /* openssl not available */
-  }
-
-  fs.writeFileSync(
-    keyPath,
-    FALLBACK_EC_KEY
-  );
-
-  fs.writeFileSync(
-    certPath,
-    FALLBACK_CERT
-  );
-}
-
-// 计算证书的 SHA-256 指纹，优先使用 openssl，不可用时用 Node.js crypto 兜底
-function getCertificateFingerprint(certPath) {
-
-  // 方案1: 优先用 openssl
-  try {
-
-    const result = execSync(
-      `openssl x509 -noout -fingerprint -sha256 -in "${certPath}"`,
-      {
-        encoding: 'utf8',
-        timeout: 3000
-      }
-    ).trim();
-
-    const match = result.match(
-      /=(.+)$/
     );
 
     if (
-      match &&
-      match[1]
+      response.data &&
+      response.data.country &&
+      response.data.org
     ) {
-      return match[1].toUpperCase();
+      return `${response.data.country}-${response.data.org}`
+        .replace(/\s+/g, '_');
     }
-
-  } catch (e) {
-    // openssl 不可用，继续用 Node.js crypto
-  }
-
-  // 方案2: Node.js crypto 兜底
-  try {
-
-    const certData = fs.readFileSync(
-      certPath,
-      'utf8'
-    );
-
-    const derMatch = certData.match(
-      /-----BEGIN CERTIFICATE-----([\s\S]+?)-----END CERTIFICATE-----/
-    );
-
-    if (!derMatch) return '';
-
-    const derBase64 = derMatch[1].replace(
-      /\s/g,
-      ''
-    );
-
-    const derBuffer = Buffer.from(
-      derBase64,
-      'base64'
-    );
-
-    const hash = crypto
-      .createHash('sha256')
-      .update(derBuffer)
-      .digest('hex');
-
-    return hash
-      .match(/.{2}/g)
-      .join(':')
-      .toUpperCase();
-
   } catch (error) {
+    // ignore
+  }
 
-    console.error(
-      'Failed to calculate certificate fingerprint:',
-      error
+  try {
+    const response2 = await axios.get(
+      'http://ip-api.com/json',
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0'
+        },
+        timeout: 5000
+      }
     );
 
-    return '';
+    if (
+      response2.data &&
+      response2.data.status === 'success' &&
+      response2.data.countryCode &&
+      response2.data.org
+    ) {
+      return `${response2.data.countryCode}-${response2.data.org}`
+        .replace(/\s+/g, '_');
+    }
+  } catch (error) {
+    // ignore
   }
+
+  return 'Unknown';
 }
 
-// 生成xr-ay配置文件
+// ==================== 获取服务器公网IP ====================
+
+async function getServerIP() {
+  let serverIP = '';
+
+  try {
+    const ipv4Response = await axios.get(
+      'http://ipv4.ip.sb',
+      {
+        timeout: 3000
+      }
+    );
+
+    serverIP = ipv4Response.data.trim();
+  } catch (err) {
+    try {
+      serverIP = execSync(
+        'curl -sm 3 ipv4.ip.sb'
+      )
+        .toString()
+        .trim();
+    } catch (curlErr) {
+      try {
+        const ipv6Response = await axios.get(
+          'http://ipv6.ip.sb',
+          {
+            timeout: 3000
+          }
+        );
+
+        serverIP = `[${ipv6Response.data.trim()}]`;
+      } catch (ipv6AxiosErr) {
+        try {
+          serverIP = `[${execSync(
+            'curl -sm 3 ipv6.ip.sb'
+          )
+            .toString()
+            .trim()}]`;
+        } catch (ipv6CurlErr) {
+          console.error(
+            'Failed to get IP address:',
+            ipv6CurlErr.message
+          );
+        }
+      }
+    }
+  }
+
+  return serverIP;
+}
+
+// ==================== 生成 Xray 配置 ====================
+
 async function generateConfig() {
-
   const config = {
-
     log: {
       access: '/dev/null',
       error: '/dev/null',
@@ -414,12 +321,22 @@ async function generateConfig() {
 
     inbounds: [
 
+      // =====================================================
+      // 核心节点：
+      // Cloudflare Tunnel
+      //        ↓
+      // 127.0.0.1:8001
+      //        ↓
       // VLESS + XHTTP
-      // Cloudflare Tunnel直接连接这里
+      // =====================================================
+
       {
         tag: 'vless-xhttp-in',
-        port: ARGO_PORT,
-        listen: '::',
+
+        port: parseInt(ARGO_PORT),
+
+        listen: '127.0.0.1',
+
         protocol: 'vless',
 
         settings: {
@@ -429,35 +346,47 @@ async function generateConfig() {
               level: 0
             }
           ],
+
           decryption: 'none'
         },
 
         streamSettings: {
           network: 'xhttp',
+
           security: 'none',
 
           xhttpSettings: {
             path: '/vless-argo',
-            mode: 'auto'
+
+            // 对 CDN / Cloudflare / 反代兼容性优先
+            mode: 'packet-up'
           }
         },
 
         sniffing: {
           enabled: true,
+
           destOverride: [
             'http',
             'tls',
             'quic'
           ],
+
           metadataOnly: false
         }
       },
 
-      // 保留原来的VLESS TCP
+      // =====================================================
+      // VLESS TCP
+      // =====================================================
+
       {
         tag: 'vless-tcp-in',
+
         port: 3001,
+
         listen: '127.0.0.1',
+
         protocol: 'vless',
 
         settings: {
@@ -466,15 +395,16 @@ async function generateConfig() {
               id: UUID
             }
           ],
+
           decryption: 'none'
         },
 
         streamSettings: {
           network: 'tcp',
+
           security: 'none'
         }
       }
-
     ],
 
     dns: {
@@ -486,16 +416,22 @@ async function generateConfig() {
     outbounds: [
       {
         protocol: 'freedom',
+
         tag: 'direct'
       },
+
       {
         protocol: 'blackhole',
+
         tag: 'block'
       }
     ]
   };
 
-  // VLESS Reality 配置
+  // =====================================================
+  // VLESS Reality
+  // =====================================================
+
   if (isValidPort(REALITY_PORT)) {
 
     config.inbounds.push({
@@ -504,9 +440,7 @@ async function generateConfig() {
 
       listen: '::',
 
-      port: parseInt(
-        REALITY_PORT
-      ),
+      port: parseInt(REALITY_PORT),
 
       protocol: 'vless',
 
@@ -515,6 +449,7 @@ async function generateConfig() {
         clients: [
           {
             id: UUID,
+
             flow: 'xtls-rprx-vision'
           }
         ],
@@ -550,18 +485,19 @@ async function generateConfig() {
     });
   }
 
-  // Hysteria2 配置
+  // =====================================================
+  // Hysteria2
+  // =====================================================
+
   if (isValidPort(HY2_PORT)) {
 
     config.inbounds.push({
 
-      tag: 'hysteria-in',
+      tag: 'hysteria2-in',
 
       listen: '::',
 
-      port: parseInt(
-        HY2_PORT
-      ),
+      port: parseInt(HY2_PORT),
 
       protocol: 'hysteria',
 
@@ -569,26 +505,14 @@ async function generateConfig() {
 
         version: 2,
 
-        clients: [
-          {
-            auth: UUID
-          }
-        ]
+        users: {
+          [UUID]: 'x'
+        }
       },
 
       streamSettings: {
 
         network: 'hysteria',
-
-        hysteriaSettings: {
-
-          version: 2,
-
-          masquerade: {
-            type: 'proxy',
-            url: 'https://bing.com'
-          }
-        },
 
         security: 'tls',
 
@@ -601,6 +525,7 @@ async function generateConfig() {
           certificates: [
             {
               certificateFile: certPath,
+
               keyFile: keyPath
             }
           ]
@@ -609,31 +534,25 @@ async function generateConfig() {
     });
   }
 
-  // S5 配置
+  // =====================================================
+  // SOCKS5
+  // =====================================================
+
   if (isValidPort(S5_PORT)) {
 
     config.inbounds.push({
 
-      tag: 's5-in',
+      tag: 'socks5-in',
 
       listen: '::',
 
-      port: parseInt(
-        S5_PORT
-      ),
+      port: parseInt(S5_PORT),
 
       protocol: 'socks',
 
       settings: {
 
-        auth: 'password',
-
-        accounts: [
-          {
-            user: UUID.substring(0, 8),
-            pass: UUID.slice(-12)
-          }
-        ],
+        auth: 'noauth',
 
         udp: true
       }
@@ -641,472 +560,342 @@ async function generateConfig() {
   }
 
   fs.writeFileSync(
-    path.join(
-      FILE_PATH,
-      'config.json'
-    ),
+    configPath,
+
     JSON.stringify(
       config,
       null,
       2
     )
   );
+
+  return config;
 }
 
-// 判断系统架构
-function getSystemArchitecture() {
+// ==================== 生成证书 ====================
 
-  const arch = os.arch();
+function generateCertificate() {
 
   if (
-    arch === 'arm' ||
-    arch === 'arm64' ||
-    arch === 'aarch64'
+    !isValidPort(HY2_PORT) ||
+    fs.existsSync(certPath) &&
+    fs.existsSync(keyPath)
   ) {
-    return 'arm';
-  } else {
-    return 'amd';
-  }
-}
-
-// 下载对应系统架构的依赖文件
-function downloadFile(
-  fileName,
-  fileUrl,
-  callback
-) {
-
-  const filePath = fileName;
-  const tempFilePath = `${filePath}.download`;
-
-  if (!fs.existsSync(FILE_PATH)) {
-    fs.mkdirSync(
-      FILE_PATH,
-      {
-        recursive: true
-      }
-    );
-  }
-
-  const writer = fs.createWriteStream(
-    tempFilePath
-  );
-
-  axios({
-    method: 'get',
-    url: fileUrl,
-    responseType: 'stream',
-  })
-    .then(response => {
-
-      response.data.pipe(writer);
-
-      writer.on(
-        'finish',
-        () => {
-
-          writer.close(
-            (closeError) => {
-
-              if (closeError) {
-
-                const errorMessage =
-                  `Download ${path.basename(filePath)} failed: ${closeError.message}`;
-
-                fs.unlink(
-                  tempFilePath,
-                  () => {}
-                );
-
-                console.error(
-                  errorMessage
-                );
-
-                callback(
-                  errorMessage
-                );
-
-                return;
-              }
-
-              try {
-
-                fs.renameSync(
-                  tempFilePath,
-                  filePath
-                );
-
-              } catch (renameError) {
-
-                const errorMessage =
-                  `Download ${path.basename(filePath)} failed: ${renameError.message}`;
-
-                fs.unlink(
-                  tempFilePath,
-                  () => {}
-                );
-
-                console.error(
-                  errorMessage
-                );
-
-                callback(
-                  errorMessage
-                );
-
-                return;
-              }
-
-              console.log(
-                `Download ${path.basename(filePath)} successfully`
-              );
-
-              callback(
-                null,
-                filePath
-              );
-            }
-          );
-        }
-      );
-
-      writer.on(
-        'error',
-        err => {
-
-          fs.unlink(
-            tempFilePath,
-            () => {}
-          );
-
-          const errorMessage =
-            `Download ${path.basename(filePath)} failed: ${err.message}`;
-
-          console.error(
-            errorMessage
-          );
-
-          callback(
-            errorMessage
-          );
-        }
-      );
-    })
-    .catch(err => {
-
-      fs.unlink(
-        tempFilePath,
-        () => {}
-      );
-
-      const errorMessage =
-        `Download ${path.basename(filePath)} failed: ${err.message}`;
-
-      console.error(
-        errorMessage
-      );
-
-      callback(
-        errorMessage
-      );
-    });
-}
-
-// 下载并运行依赖文件
-async function downloadFilesAndRun() {
-
-  const architecture =
-    getSystemArchitecture();
-
-  const filesToDownload =
-    getFilesForArchitecture(
-      architecture
-    );
-
-  if (filesToDownload.length === 0) {
-
-    console.log(
-      `Can't find a file for the current architecture`
-    );
-
     return;
   }
-
-  const downloadPromises =
-    filesToDownload.map(
-      fileInfo => {
-
-        return new Promise(
-          (resolve, reject) => {
-
-            const tryDownload = (
-              urlIndex
-            ) => {
-
-              downloadFile(
-                fileInfo.fileName,
-                fileInfo.fileUrls[urlIndex],
-                (err, filePath) => {
-
-                  if (!err) {
-
-                    resolve(
-                      filePath
-                    );
-
-                    return;
-                  }
-
-                  if (
-                    urlIndex + 1 <
-                    fileInfo.fileUrls.length
-                  ) {
-
-                    console.log(
-                      `Retrying ${path.basename(fileInfo.fileName)} from backup source`
-                    );
-
-                    tryDownload(
-                      urlIndex + 1
-                    );
-
-                    return;
-                  }
-
-                  reject(err);
-                }
-              );
-            };
-
-            tryDownload(0);
-          }
-        );
-      }
-    );
 
   try {
 
-    await Promise.all(
-      downloadPromises
-    );
-
-  } catch (err) {
-
-    console.error(
-      'Error downloading files:',
-      err
-    );
-
-    return;
-  }
-
-  function authorizeFiles(
-    filePaths
-  ) {
-
-    const newPermissions =
-      0o775;
-
-    filePaths.forEach(
-      absoluteFilePath => {
-
-        if (
-          fs.existsSync(
-            absoluteFilePath
-          )
-        ) {
-
-          try {
-
-            fs.chmodSync(
-              absoluteFilePath,
-              newPermissions
-            );
-
-            console.log(
-              `Empowerment success for ${absoluteFilePath}: ${newPermissions.toString(8)}`
-            );
-
-          } catch (err) {
-
-            console.error(
-              `Empowerment failed for ${absoluteFilePath}: ${err}`
-            );
-          }
-        }
+    execSync(
+      `openssl req -x509 -newkey rsa:2048 -nodes -keyout "${keyPath}" -out "${certPath}" -days 3650 -subj "/CN=www.bing.com"`,
+      {
+        stdio: 'ignore'
       }
     );
+
+  } catch (error) {
+
+    console.log(
+      'Certificate generation failed'
+    );
   }
+}
 
-  const filesToAuthorize =
-    NEZHA_PORT
-      ? [npmPath, webPath, botPath]
-      : [phpPath, webPath, botPath];
+// ==================== 获取证书指纹 ====================
 
-  authorizeFiles(
-    filesToAuthorize
-  );
+function getCertificateFingerprint(file) {
 
-  // 运行ne-zha
-  if (
-    NEZHA_SERVER &&
-    NEZHA_KEY
-  ) {
+  try {
 
-    if (!NEZHA_PORT) {
+    const output = execSync(
+      `openssl x509 -in "${file}" -noout -fingerprint -sha256`,
+      {
+        encoding: 'utf8'
+      }
+    );
 
-      const port =
-        NEZHA_SERVER.includes(':')
-          ? NEZHA_SERVER.split(':').pop()
-          : '';
+    const match = output.match(
+      /=([A-F0-9:]+)/
+    );
 
-      const tlsPorts =
-        new Set([
-          '443',
-          '8443',
-          '2096',
-          '2087',
-          '2083',
-          '2053'
-        ]);
+    if (!match) {
+      return '';
+    }
 
-      const nezhatls =
-        tlsPorts.has(port)
-          ? 'true'
-          : 'false';
+    return match[1].replace(
+      /:/g,
+      ''
+    );
 
-      const configYaml = `
-client_secret: ${NEZHA_KEY}
-debug: false
-disable_auto_update: true
-disable_command_execute: false
-disable_force_update: true
-disable_nat: false
-disable_send_query: false
-gpu: false
-insecure_tls: true
-ip_report_period: 1800
-report_delay: 4
-server: ${NEZHA_SERVER}
-skip_connection_count: true
-skip_procs_count: true
-temperature: false
-tls: ${nezhatls}
-use_gitee_to_upgrade: false
-use_ipv6_country_code: false
-uuid: ${UUID}`;
+  } catch (error) {
+
+    return '';
+  }
+}
+
+// ==================== 生成订阅 ====================
+
+async function generateLinks(argoDomain) {
+
+  const ISP = await getMetaInfo();
+
+  const nodeName =
+    NAME
+      ? `${NAME}-${ISP}`
+      : ISP;
+
+  const SERVER_IP =
+    await getServerIP();
+
+  return new Promise(resolve => {
+
+    setTimeout(() => {
+
+      // ===================================================
+      // 唯一主节点：
+      // VLESS + XHTTP
+      // ===================================================
+
+      let subTxt = `
+
+vless://${UUID}@${CFIP}:${CFPORT}?encryption=none&security=tls&sni=${argoDomain}&fp=firefox&type=xhttp&host=${argoDomain}&path=%2Fvless-argo&mode=packet-up#${nodeName}
+
+`;
+
+      // ===================================================
+      // Hysteria2
+      // ===================================================
+
+      if (isValidPort(HY2_PORT)) {
+
+        const fingerprint =
+          getCertificateFingerprint(
+            certPath
+          );
+
+        const fingerprintParam =
+          fingerprint
+            ? `&pinSHA256=${encodeURIComponent(
+                fingerprint
+              )}`
+            : '';
+
+        const hysteriaNode =
+          `hysteria2://${UUID}@${SERVER_IP}:${HY2_PORT}/?sni=www.bing.com&insecure=0&alpn=h3&obfs=none${fingerprintParam}#${nodeName}`;
+
+        subTxt +=
+          `\n${hysteriaNode}\n`;
+      }
+
+      // ===================================================
+      // Reality
+      // ===================================================
+
+      if (
+        isValidPort(REALITY_PORT) &&
+        publicKey
+      ) {
+
+        const realityNode =
+          `vless://${UUID}@${SERVER_IP}:${REALITY_PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.iij.ad.jp&fp=chrome&pbk=${publicKey}&sid=&type=tcp#${nodeName}-Reality`;
+
+        subTxt +=
+          `\n${realityNode}\n`;
+      }
+
+      // ===================================================
+      // SOCKS5
+      // ===================================================
+
+      if (isValidPort(S5_PORT)) {
+
+        const socksNode =
+          `socks://${SERVER_IP}:${S5_PORT}#${nodeName}-Socks5`;
+
+        subTxt +=
+          `\n${socksNode}\n`;
+      }
+
+      subTxt =
+        subTxt.trim() +
+        '\n';
+
+      fs.mkdirSync(
+        subPath,
+        {
+          recursive: true
+        }
+      );
+
+      const base64Sub =
+        Buffer.from(
+          subTxt
+        ).toString('base64');
 
       fs.writeFileSync(
         path.join(
-          FILE_PATH,
-          'config.yaml'
+          subPath,
+          'sub.txt'
         ),
-        configYaml
+        subTxt
       );
 
-      const command =
-        `nohup ${phpPath} -c "${FILE_PATH}/config.yaml" >/dev/null 2>&1 &`;
+      fs.writeFileSync(
+        path.join(
+          subPath,
+          'sub_base64.txt'
+        ),
+        base64Sub
+      );
 
-      try {
+      console.log(
+        '\n========== XHTTP SUBSCRIPTION ==========\n'
+      );
 
-        await exec(
-          command
-        );
+      console.log(subTxt);
 
-        console.log(
-          `${phpName} is running`
-        );
+      console.log(
+        '========================================\n'
+      );
 
-        await new Promise(
-          resolve => setTimeout(
-            resolve,
-            1000
-          )
-        );
+      resolve(subTxt);
 
-      } catch (error) {
+    }, 1000);
+  });
+}
 
-        console.error(
-          `php running error: ${error}`
-        );
+// ==================== 上传订阅 ====================
+
+async function uploadSubscription(content) {
+
+  if (!UPLOAD_URL) {
+    return;
+  }
+
+  try {
+
+    await axios.post(
+      UPLOAD_URL,
+      {
+        content
+      },
+      {
+        timeout: 15000
       }
+    );
 
-    } else {
+    console.log(
+      'Subscription uploaded successfully'
+    );
 
-      let NEZHA_TLS = '';
+  } catch (error) {
 
-      const tlsPorts = [
-        '443',
-        '8443',
-        '2096',
-        '2087',
-        '2083',
-        '2053'
-      ];
+    console.log(
+      'Subscription upload failed'
+    );
+  }
+}
 
-      if (
-        tlsPorts.includes(
-          NEZHA_PORT
-        )
-      ) {
-        NEZHA_TLS = '--tls';
+// ==================== Telegram ====================
+
+async function sendTelegram(message) {
+
+  if (
+    !BOT_TOKEN ||
+    !CHAT_ID
+  ) {
+    return;
+  }
+
+  try {
+
+    await axios.post(
+      `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+      {
+        chat_id: CHAT_ID,
+
+        text: message,
+
+        disable_web_page_preview: true
+      },
+      {
+        timeout: 10000
       }
+    );
 
-      const command =
-        `nohup ${npmPath} -s ${NEZHA_SERVER}:${NEZHA_PORT} -p ${NEZHA_KEY} ${NEZHA_TLS} --disable-auto-update --report-delay 4 --skip-conn --skip-procs >/dev/null 2>&1 &`;
+  } catch (error) {
 
-      try {
+    console.log(
+      'Telegram notification failed'
+    );
+  }
+}
 
-        await exec(
-          command
-        );
+// ==================== Nezha ====================
 
-        console.log(
-          `${npmName} is running`
-        );
+async function runNezha() {
 
-        await new Promise(
-          resolve => setTimeout(
-            resolve,
-            1000
-          )
-        );
-
-      } catch (error) {
-
-        console.error(
-          `npm running error: ${error}`
-        );
-      }
-    }
-
-  } else {
+  if (
+    !NEZHA_SERVER ||
+    !NEZHA_KEY
+  ) {
 
     console.log(
       'NEZHA variable is empty,skip running'
     );
+
+    return;
   }
 
-  // 运行xr-ay
+  try {
+
+    if (NEZHA_PORT) {
+
+      const command =
+        `nohup ${npmPath} -s ${NEZHA_SERVER}:${NEZHA_PORT} -p ${NEZHA_KEY} >/dev/null 2>&1 &`;
+
+      await exec(command);
+
+    } else {
+
+      const command =
+        `nohup ${phpPath} -s ${NEZHA_SERVER} -p ${NEZHA_KEY} >/dev/null 2>&1 &`;
+
+      await exec(command);
+    }
+
+    console.log(
+      'Nezha is running'
+    );
+
+  } catch (error) {
+
+    console.error(
+      `npm running error: ${error}`
+    );
+  }
+}
+
+// ==================== 运行 Xray / Cloudflare ====================
+
+async function runServices() {
+
+  // =====================================================
+  // 运行 Xray
+  // =====================================================
+
   const command1 =
     `nohup ${webPath} -c ${FILE_PATH}/config.json >/dev/null 2>&1 &`;
 
   try {
 
-    await exec(
-      command1
-    );
+    await exec(command1);
 
     console.log(
       `${webName} is running`
     );
 
-    await new Promise(
-      resolve => setTimeout(
-        resolve,
-        1000
-      )
-    );
+    await sleep(1000);
 
   } catch (error) {
 
@@ -1115,13 +904,15 @@ uuid: ${UUID}`;
     );
   }
 
-  // 运行cloud-fared
-  if (
-    fs.existsSync(botPath)
-  ) {
+  // =====================================================
+  // 运行 Cloudflare Tunnel
+  // =====================================================
+
+  if (fs.existsSync(botPath)) {
 
     let args;
 
+    // Token 模式
     if (
       ARGO_AUTH.match(
         /^[A-Z0-9a-z=]{120,250}$/
@@ -1131,7 +922,10 @@ uuid: ${UUID}`;
       args =
         `tunnel --edge-ip-version auto --no-autoupdate --protocol http2 run --token ${ARGO_AUTH}`;
 
-    } else if (
+    }
+
+    // TunnelSecret 模式
+    else if (
       ARGO_AUTH.match(
         /TunnelSecret/
       )
@@ -1140,10 +934,14 @@ uuid: ${UUID}`;
       args =
         `tunnel --edge-ip-version auto --config "${path.resolve(FILE_PATH, 'tunnel.yml')}" run`;
 
-    } else {
+    }
+
+    // Quick Tunnel
+    else {
 
       args =
-        `tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile "${path.resolve(bootLogPath)}" --loglevel info --url http://localhost:${ARGO_PORT}`;
+        `tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile "${path.resolve(bootLogPath)}" --loglevel info --url http://127.0.0.1:${ARGO_PORT}`;
+
     }
 
     try {
@@ -1156,12 +954,7 @@ uuid: ${UUID}`;
         `${botName} is running`
       );
 
-      await new Promise(
-        resolve => setTimeout(
-          resolve,
-          2000
-        )
-      );
+      await sleep(2000);
 
     } catch (error) {
 
@@ -1171,15 +964,11 @@ uuid: ${UUID}`;
     }
   }
 
-  await new Promise(
-    resolve => setTimeout(
-      resolve,
-      5000
-    )
-  );
+  await sleep(5000);
 }
 
-// 根据系统架构返回对应的url
+// ==================== 根据架构获取文件 ====================
+
 function getFilesForArchitecture(
   architecture
 ) {
@@ -1195,20 +984,25 @@ function getFilesForArchitecture(
       : 'https://amd64.ssss.nyc.mn';
 
   const baseFiles = [
+
     {
       fileName: webPath,
+
       fileUrls: [
         `${baseUrl}/web`,
         `${backupUrl}/web`
       ]
     },
+
     {
       fileName: botPath,
+
       fileUrls: [
         `${baseUrl}/bot`,
         `${backupUrl}/bot`
       ]
     }
+
   ];
 
   if (
@@ -1219,7 +1013,9 @@ function getFilesForArchitecture(
     if (NEZHA_PORT) {
 
       baseFiles.unshift({
+
         fileName: npmPath,
+
         fileUrls: [
           `${baseUrl}/agent`,
           `${backupUrl}/agent`
@@ -1229,7 +1025,9 @@ function getFilesForArchitecture(
     } else {
 
       baseFiles.unshift({
+
         fileName: phpPath,
+
         fileUrls: [
           `${baseUrl}/v1`,
           `${backupUrl}/v1`
@@ -1241,7 +1039,8 @@ function getFilesForArchitecture(
   return baseFiles;
 }
 
-// 获取固定隧道json
+// ==================== 固定 Tunnel ====================
+
 function argoType() {
 
   if (
@@ -1250,7 +1049,7 @@ function argoType() {
   ) {
 
     console.log(
-      "ARGO_DOMAIN or ARGO_AUTH is empty, use quick tunnels"
+      'ARGO_DOMAIN or ARGO_AUTH is empty, use quick tunnels'
     );
 
     return;
@@ -1271,16 +1070,28 @@ function argoType() {
     );
 
     const tunnelYaml = `
+
   tunnel: ${ARGO_AUTH.split('"')[11]}
-  credentials-file: ${path.join(FILE_PATH, 'tunnel.json')}
+
+  credentials-file: ${path.join(
+    FILE_PATH,
+    'tunnel.json'
+  )}
+
   protocol: http2
-  
+
   ingress:
+
     - hostname: ${ARGO_DOMAIN}
-      service: http://localhost:${ARGO_PORT}
+
+      service: http://127.0.0.1:${ARGO_PORT}
+
       originRequest:
+
         noTLSVerify: true
+
     - service: http_status:404
+
   `;
 
     fs.writeFileSync(
@@ -1298,6 +1109,8 @@ function argoType() {
     );
   }
 }
+
+// ==================== 获取 Quick Tunnel 日志 ====================
 
 async function waitForQuickTunnelLog(
   timeoutMs = 30000
@@ -1329,36 +1142,36 @@ async function waitForQuickTunnelLog(
             content
           )
         ) {
+
           return content;
         }
       }
 
     } catch (error) {
-      // 日志文件可能仍在创建中
+
+      // 日志文件可能仍在创建
     }
 
-    await new Promise(
-      resolve => setTimeout(
-        resolve,
-        1000
-      )
-    );
+    await sleep(1000);
   }
 
   return '';
 }
 
-// 获取临时隧道domain
+// ==================== 获取临时 Tunnel Domain ====================
+
 async function extractDomains() {
 
   let argoDomain;
 
+  // 固定域名
   if (
     ARGO_AUTH &&
     ARGO_DOMAIN
   ) {
 
-    argoDomain = ARGO_DOMAIN;
+    argoDomain =
+      ARGO_DOMAIN;
 
     console.log(
       'ARGO_DOMAIN:',
@@ -1369,59 +1182,61 @@ async function extractDomains() {
       argoDomain
     );
 
-  } else {
+    return;
+  }
 
-    try {
+  // Quick Tunnel
+  try {
 
-      const fileContent =
-        await waitForQuickTunnelLog();
+    const fileContent =
+      await waitForQuickTunnelLog();
 
-      const lines =
-        fileContent.split('\n');
+    const lines =
+      fileContent.split('\n');
 
-      const argoDomains = [];
+    const argoDomains = [];
 
-      lines.forEach(
-        (line) => {
+    lines.forEach(line => {
 
-          const domainMatch =
-            line.match(
-              /https?:\/\/([^ ]*trycloudflare\.com)\/?/
-            );
+      const domainMatch =
+        line.match(
+          /https?:\/\/([^ ]*trycloudflare\.com)\/?/
+        );
 
-          if (domainMatch) {
+      if (domainMatch) {
 
-            const domain =
-              domainMatch[1];
+        const domain =
+          domainMatch[1];
 
-            argoDomains.push(
-              domain
-            );
-          }
-        }
+        argoDomains.push(
+          domain
+        );
+      }
+    });
+
+    if (
+      argoDomains.length > 0
+    ) {
+
+      argoDomain =
+        argoDomains[0];
+
+      console.log(
+        'ArgoDomain:',
+        argoDomain
       );
 
-      if (
-        argoDomains.length > 0
-      ) {
+      await generateLinks(
+        argoDomain
+      );
 
-        argoDomain =
-          argoDomains[0];
+    } else {
 
-        console.log(
-          'ArgoDomain:',
-          argoDomain
-        );
+      console.log(
+        'ArgoDomain not found, re-running bot to obtain ArgoDomain'
+      );
 
-        await generateLinks(
-          argoDomain
-        );
-
-      } else {
-
-        console.log(
-          'ArgoDomain not found, re-running bot to obtain ArgoDomain'
-        );
+      try {
 
         fs.unlinkSync(
           path.join(
@@ -1430,891 +1245,514 @@ async function extractDomains() {
           )
         );
 
-        async function killBotProcess() {
+      } catch (error) {
+        // ignore
+      }
 
-          try {
-
-            if (
-              process.platform === 'win32'
-            ) {
-
-              await exec(
-                `taskkill /f /im ${botName}.exe > nul 2>&1`
-              );
-
-            } else {
-
-              await exec(
-                `pkill -f "[${botName.charAt(0)}]${botName.substring(1)}" > /dev/null 2>&1`
-              );
-            }
-
-          } catch (error) {
-            // 忽略输出
-          }
-        }
-
-        killBotProcess();
-
-        await new Promise(
-          resolve => setTimeout(
-            resolve,
-            3000
-          )
-        );
-
-        const args =
-          `tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile "${path.resolve(bootLogPath)}" --loglevel info --url http://localhost:${ARGO_PORT}`;
+      async function killBotProcess() {
 
         try {
 
-          await exec(
-            `nohup "${path.resolve(botPath)}" ${args} >/dev/null 2>&1 &`
-          );
+          if (
+            process.platform === 'win32'
+          ) {
 
-          console.log(
-            `${botName} is running`
-          );
+            await exec(
+              `taskkill /f /im ${botName}.exe > nul 2>&1`
+            );
 
-          await new Promise(
-            resolve => setTimeout(
-              resolve,
-              6000
-            )
-          );
+          } else {
 
-          await extractDomains();
+            await exec(
+              `pkill -f "[${botName.charAt(0)}]${botName.substring(1)}" > /dev/null 2>&1`
+            );
+          }
 
         } catch (error) {
-
-          console.error(
-            `Error executing command: ${error}`
-          );
+          // ignore
         }
       }
-    }
 
-    catch (error) {
+      await killBotProcess();
 
-      console.error(
-        'Error reading boot.log:',
-        error
-      );
-    }
-  }
-}
+      await sleep(3000);
 
-// 获取isp信息
-function getMetaInfo() {
-
-  return new Promise(
-    async resolve => {
+      const args =
+        `tunnel --edge-ip-version auto --no-autoupdate --protocol http2 --logfile "${path.resolve(bootLogPath)}" --loglevel info --url http://127.0.0.1:${ARGO_PORT}`;
 
       try {
 
-        const response1 =
-          await axios.get(
-            'https://api.ip.sb/geoip',
-            {
-              headers: {
-                'User-Agent': 'Mozilla/5.0',
-                timeout: 3000
-              }
-            }
-          );
-
-        if (
-          response1.data &&
-          response1.data.country_code &&
-          response1.data.isp
-        ) {
-
-          resolve(
-            `${response1.data.country_code}-${response1.data.isp}`
-              .replace(
-                /\s+/g,
-                '_'
-              )
-          );
-
-          return;
-        }
+        await exec(
+          `nohup "${path.resolve(botPath)}" ${args} >/dev/null 2>&1 &`
+        );
 
       } catch (error) {
 
-        try {
-
-          const response2 =
-            await axios.get(
-              'http://ip-api.com/json',
-              {
-                headers: {
-                  'User-Agent': 'Mozilla/5.0',
-                  timeout: 3000
-                }
-              }
-            );
-
-          if (
-            response2.data &&
-            response2.data.status === 'success' &&
-            response2.data.countryCode &&
-            response2.data.org
-          ) {
-
-            resolve(
-              `${response2.data.countryCode}-${response2.data.org}`
-                .replace(
-                  /\s+/g,
-                  '_'
-                )
-            );
-
-            return;
-          }
-
-        } catch (error) {
-          // console.error('Backup API also failed');
-        }
+        console.error(
+          'Failed to restart cloudflared'
+        );
       }
 
-      resolve(
-        'Unknown'
-      );
-    }
-  );
-}
-
-// 获取服务器公网IP
-function getServerIP() {
-
-  return new Promise(
-    async resolve => {
-
-      let serverIP = '';
-
-      try {
-
-        const ipv4Response =
-          await axios.get(
-            'http://ipv4.ip.sb',
-            {
-              timeout: 3000
-            }
-          );
-
-        serverIP =
-          ipv4Response.data.trim();
-
-      } catch (err) {
-
-        try {
-
-          serverIP =
-            execSync(
-              'curl -sm 3 ipv4.ip.sb'
-            )
-              .toString()
-              .trim();
-
-        } catch (curlErr) {
-
-          try {
-
-            const ipv6Response =
-              await axios.get(
-                'http://ipv6.ip.sb',
-                {
-                  timeout: 3000
-                }
-              );
-
-            serverIP =
-              `[${ipv6Response.data.trim()}]`;
-
-          } catch (ipv6AxiosErr) {
-
-            try {
-
-              serverIP =
-                `[${execSync(
-                  'curl -sm 3 ipv6.ip.sb'
-                ).toString().trim()}]`;
-
-            } catch (ipv6CurlErr) {
-
-              console.error(
-                'Failed to get IP address:',
-                ipv6CurlErr.message
-              );
-            }
-          }
-        }
-      }
-
-      resolve(
-        serverIP
-      );
-    }
-  );
-}
-
-// 生成 list 和 sub 信息
-async function generateLinks(
-  argoDomain
-) {
-
-  const ISP =
-    await getMetaInfo();
-
-  const nodeName =
-    NAME
-      ? `${NAME}-${ISP}`
-      : ISP;
-
-  const SERVER_IP =
-    await getServerIP();
-
-  return new Promise(
-    (resolve) => {
-
-      setTimeout(
-        () => {
-
-          // 主节点：VLESS + XHTTP + TLS
-          let subTxt = `
-vless://${UUID}@${CFIP}:${CFPORT}?encryption=none&security=tls&sni=${argoDomain}&fp=firefox&type=xhttp&host=${argoDomain}&path=%2Fvless-argo&mode=auto#${nodeName}
-`;
-
-          // HY2_PORT是有效端口号时生成hysteria2节点
-          if (
-            isValidPort(HY2_PORT)
-          ) {
-
-            const fingerprint =
-              getCertificateFingerprint(
-                certPath
-              );
-
-            const fingerprintParam =
-              fingerprint
-                ? `&pinSHA256=${encodeURIComponent(fingerprint)}`
-                : '';
-
-            const hysteriaNode =
-              `\nhysteria2://${UUID}@${SERVER_IP}:${HY2_PORT}/?sni=www.bing.com&insecure=0&alpn=h3&obfs=none${fingerprintParam}#${nodeName}`;
-
-            subTxt +=
-              hysteriaNode;
-          }
-
-          // REALITY_PORT是有效端口号时生成reality节点
-          if (
-            isValidPort(REALITY_PORT)
-          ) {
-
-            const vlessNode =
-              `\nvless://${UUID}@${SERVER_IP}:${REALITY_PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.iij.ad.jp&fp=firefox&pbk=${publicKey}&type=tcp&headerType=none#${nodeName}`;
-
-            subTxt +=
-              vlessNode;
-          }
-
-          // S5_PORT是有效端口号时生成socks5节点
-          if (
-            isValidPort(S5_PORT)
-          ) {
-
-            const S5_AUTH =
-              Buffer.from(
-                `${UUID.substring(0, 8)}:${UUID.slice(-12)}`
-              ).toString(
-                'base64'
-              );
-
-            const s5Node =
-              `\nsocks://${S5_AUTH}@${SERVER_IP}:${S5_PORT}#${nodeName}`;
-
-            subTxt +=
-              s5Node;
-          }
-
-          console.log(
-            Buffer.from(
-              subTxt
-            ).toString(
-              'base64'
-            )
-          );
-
-          fs.writeFileSync(
-            subPath,
-            Buffer.from(
-              subTxt
-            ).toString(
-              'base64'
-            )
-          );
-
-          fs.writeFileSync(
-            listPath,
-            subTxt,
-            'utf8'
-          );
-
-          console.log(
-            `${FILE_PATH}/sub.txt saved successfully`
-          );
-
-          // 将订阅内容保存到全局变量，供 http 服务器使用
-          subContent =
-            Buffer.from(
-              subTxt
-            ).toString(
-              'base64'
-            );
-
-          uploadNodes();
-
-          resolve(
-            subTxt
-          );
-
-        },
-        2000
-      );
-    }
-  );
-}
-
-// 自动上传节点或订阅
-async function uploadNodes() {
-
-  if (
-    UPLOAD_URL &&
-    PROJECT_URL
-  ) {
-
-    const subscriptionUrl =
-      `${PROJECT_URL}/${SUB_PATH}`;
-
-    const jsonData = {
-      subscription: [
-        subscriptionUrl
-      ]
-    };
-
-    try {
-
-      const response =
-        await axios.post(
-          `${UPLOAD_URL}/api/add-subscriptions`,
-          jsonData,
-          {
-            headers: {
-              'Content-Type': 'application/json'
-            }
-          }
+      const retryContent =
+        await waitForQuickTunnelLog(
+          30000
         );
 
-      if (
-        response &&
-        response.status === 200
+      const retryLines =
+        retryContent.split('\n');
+
+      for (
+        const line of retryLines
       ) {
+
+        const match =
+          line.match(
+            /https?:\/\/([^ ]*trycloudflare\.com)\/?/
+          );
+
+        if (match) {
+
+          argoDomain =
+            match[1];
+
+          break;
+        }
+      }
+
+      if (argoDomain) {
 
         console.log(
-          'Subscription uploaded successfully'
+          'Retry ArgoDomain:',
+          argoDomain
         );
 
-        return response;
-
-      } else {
-
-        return null;
-      }
-
-    } catch (error) {
-
-      if (
-        error.response
-      ) {
-
-        if (
-          error.response.status === 400
-        ) {
-          // console.error('Subscription already exists');
-        }
+        await generateLinks(
+          argoDomain
+        );
       }
     }
-
-  } else if (
-    UPLOAD_URL
-  ) {
-
-    if (
-      !fs.existsSync(
-        listPath
-      )
-    ) {
-      return;
-    }
-
-    const content =
-      fs.readFileSync(
-        listPath,
-        'utf-8'
-      );
-
-    const nodes =
-      content
-        .split('\n')
-        .filter(
-          line =>
-            /(vless|vmess|trojan|hysteria2|socks):\/\//
-              .test(line)
-        );
-
-    if (
-      nodes.length === 0
-    ) {
-      return;
-    }
-
-    const jsonData =
-      JSON.stringify({
-        nodes
-      });
-
-    try {
-
-      const response =
-        await axios.post(
-          `${UPLOAD_URL}/api/add-nodes`,
-          jsonData,
-          {
-            headers: {
-              'Content-Type': 'application/json'
-            }
-          }
-        );
-
-      if (
-        response &&
-        response.status === 200
-      ) {
-
-        console.log(
-          'Nodes uploaded successfully'
-        );
-
-        return response;
-
-      } else {
-
-        return null;
-      }
-
-    } catch (error) {
-
-      return null;
-    }
-
-  } else {
-
-    return;
-  }
-}
-
-// 90s后删除相关文件
-function cleanFiles() {
-
-  setTimeout(
-    () => {
-
-      const filesToDelete = [
-        bootLogPath,
-        configPath,
-        webPath,
-        botPath,
-        listPath,
-        certPath,
-        keyPath
-      ];
-
-      if (
-        NEZHA_PORT
-      ) {
-
-        filesToDelete.push(
-          npmPath
-        );
-
-      } else if (
-        NEZHA_SERVER &&
-        NEZHA_KEY
-      ) {
-
-        filesToDelete.push(
-          phpPath
-        );
-      }
-
-      if (
-        process.platform === 'win32'
-      ) {
-
-        exec(
-          `del /f /q ${filesToDelete.join(' ')} > nul 2>&1`,
-          (error) => {
-
-            console.clear();
-
-            alwaysLog(
-              'App is running'
-            );
-
-            console.log(
-              'Thank you for using this script, enjoy!'
-            );
-          }
-        );
-
-      } else {
-
-        exec(
-          `rm -rf ${filesToDelete.join(' ')} >/dev/null 2>&1`,
-          (error) => {
-
-            console.clear();
-
-            alwaysLog(
-              'App is running'
-            );
-
-            console.log(
-              'Thank you for using this script, enjoy!'
-            );
-          }
-        );
-      }
-
-    },
-    90000
-  );
-}
-
-cleanFiles();
-
-// Telegram 推送节点
-async function sendTelegram() {
-
-  if (
-    !BOT_TOKEN ||
-    !CHAT_ID
-  ) {
-
-    console.log(
-      'TG variables is empty, Skipping push nodes to TG'
-    );
-
-    return;
-  }
-
-  try {
-
-    const message =
-      fs.readFileSync(
-        subPath,
-        'utf8'
-      );
-
-    const url =
-      `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
-
-    const escapedName =
-      NAME.replace(
-        /[_*\[\]()~`>#+=|{}.!-]/g,
-        '\\$&'
-      );
-
-    const params = {
-
-      chat_id: CHAT_ID,
-
-      text:
-        `**${escapedName}节点推送**\n\`\`\`${message}\`\`\``,
-
-      parse_mode:
-        'MarkdownV2'
-    };
-
-    await axios.post(
-      url,
-      null,
-      {
-        params
-      }
-    );
-
-    console.log(
-      'Telegram message sent successfully'
-    );
 
   } catch (error) {
 
     console.error(
-      'Failed to send Telegram message:',
+      'extractDomains error:',
       error.message
     );
   }
 }
 
-// 自动访问项目URL
-async function AddVisitTask() {
+// ==================== HTTP 订阅服务器 ====================
 
-  if (
-    !AUTO_ACCESS ||
-    !PROJECT_URL
-  ) {
+function startSubscriptionServer() {
 
-    console.log(
-      "Skipping adding automatic access task"
+  const http =
+    require('http');
+
+  const server =
+    http.createServer(
+      (req, res) => {
+
+        try {
+
+          const url =
+            new URL(
+              req.url,
+              `http://${req.headers.host}`
+            );
+
+          // Base64 订阅
+          if (
+            url.pathname ===
+            `/${SUB_PATH}`
+          ) {
+
+            const file =
+              path.join(
+                subPath,
+                'sub_base64.txt'
+              );
+
+            if (
+              fs.existsSync(file)
+            ) {
+
+              const content =
+                fs.readFileSync(
+                  file,
+                  'utf8'
+                );
+
+              res.writeHead(
+                200,
+                {
+                  'Content-Type':
+                    'text/plain; charset=utf-8',
+
+                  'Cache-Control':
+                    'no-cache'
+                }
+              );
+
+              res.end(
+                content
+              );
+
+              return;
+            }
+          }
+
+          // 原始订阅
+          if (
+            url.pathname ===
+            `/${SUB_PATH}/raw`
+          ) {
+
+            const file =
+              path.join(
+                subPath,
+                'sub.txt'
+              );
+
+            if (
+              fs.existsSync(file)
+            ) {
+
+              const content =
+                fs.readFileSync(
+                  file,
+                  'utf8'
+                );
+
+              res.writeHead(
+                200,
+                {
+                  'Content-Type':
+                    'text/plain; charset=utf-8',
+
+                  'Cache-Control':
+                    'no-cache'
+                }
+              );
+
+              res.end(
+                content
+              );
+
+              return;
+            }
+          }
+
+          res.writeHead(
+            404,
+            {
+              'Content-Type':
+                'text/plain'
+            }
+          );
+
+          res.end(
+            'Not Found'
+          );
+
+        } catch (error) {
+
+          res.writeHead(
+            500
+          );
+
+          res.end(
+            'Internal Server Error'
+          );
+        }
+      }
     );
 
+  server.listen(
+    PORT,
+    '0.0.0.0',
+    () => {
+
+      console.log(
+        `Subscription server running on port ${PORT}`
+      );
+    }
+  );
+}
+
+// ==================== 上传 / 项目访问 ====================
+
+async function uploadFiles() {
+
+  if (!UPLOAD_URL) {
     return;
   }
 
   try {
 
-    const response =
-      await axios.post(
-        'https://oooo.serv00.net/add-url',
-        {
-          url: PROJECT_URL
-        },
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }
-      );
+    const content =
+      fs.existsSync(
+        path.join(
+          subPath,
+          'sub_base64.txt'
+        )
+      )
+        ? fs.readFileSync(
+            path.join(
+              subPath,
+              'sub_base64.txt'
+            ),
+            'utf8'
+          )
+        : '';
 
-    console.log(
-      `automatic access task added successfully`
+    if (!content) {
+      return;
+    }
+
+    await axios.post(
+      UPLOAD_URL,
+      {
+        content
+      },
+      {
+        timeout: 15000
+      }
     );
-
-    return response;
 
   } catch (error) {
 
-    console.error(
-      `Add automatic access task faild: ${error.message}`
+    console.log(
+      'Upload failed'
     );
-
-    return null;
   }
 }
 
-// 主运行逻辑
-async function startserver() {
+// ==================== 自动访问 ====================
+
+async function autoAccess() {
+
+  if (!AUTO_ACCESS) {
+    return;
+  }
 
   try {
 
-    argoType();
+    await axios.get(
+      AUTO_ACCESS,
+      {
+        timeout: 10000
+      }
+    );
 
-    deleteNodes();
-
-    cleanupOldFiles();
-
-    // 生成 Reality 密钥对 (仅当 REALITY_PORT 开启才生成)
-    if (
-      isValidPort(
-        REALITY_PORT
-      )
-    ) {
-
-      generateOrLoadKeyPair();
-    }
-
-    // 生成 TLS 证书 (用于 Hysteria2)
-    if (
-      isValidPort(
-        HY2_PORT
-      )
-    ) {
-
-      ensureTlsCertificates(
-        certPath,
-        keyPath
-      );
-    }
-
-    await generateConfig();
-
-    await downloadFilesAndRun();
-
-    await extractDomains();
-
-    await sendTelegram();
-
-    await AddVisitTask();
+    console.log(
+      'AUTO_ACCESS completed'
+    );
 
   } catch (error) {
 
-    console.error(
-      'Error in startserver:',
-      error
+    console.log(
+      'AUTO_ACCESS failed'
     );
   }
 }
 
-startserver().catch(
+// ==================== 主程序 ====================
+
+async function main() {
+
+  console.log(
+    '============================================'
+  );
+
+  console.log(
+    ' VLESS + XHTTP deployment'
+  );
+
+  console.log(
+    ' XHTTP mode: packet-up'
+  );
+
+  console.log(
+    ' Cloudflare origin: 127.0.0.1:' +
+    ARGO_PORT
+  );
+
+  console.log(
+    '============================================'
+  );
+
+  // 创建目录
+  fs.mkdirSync(
+    FILE_PATH,
+    {
+      recursive: true
+    }
+  );
+
+  fs.mkdirSync(
+    subPath,
+    {
+      recursive: true
+    }
+  );
+
+  // Reality
+  initRealityKeys();
+
+  // 证书
+  generateCertificate();
+
+  // Tunnel 配置
+  argoType();
+
+  // 下载程序
+  const architecture =
+    getArchitecture();
+
+  const files =
+    getFilesForArchitecture(
+      architecture
+    );
+
+  for (
+    const file of files
+  ) {
+
+    if (
+      fs.existsSync(
+        file.fileName
+      )
+    ) {
+
+      console.log(
+        `${file.fileName} already exists`
+      );
+
+      continue;
+    }
+
+    let downloaded =
+      false;
+
+    for (
+      const url of file.fileUrls
+    ) {
+
+      console.log(
+        `Downloading ${url}`
+      );
+
+      const ok =
+        await downloadFile(
+          url,
+          file.fileName
+        );
+
+      if (ok) {
+
+        downloaded =
+          true;
+
+        break;
+      }
+    }
+
+    if (!downloaded) {
+
+      console.error(
+        `Failed to download ${file.fileName}`
+      );
+    }
+  }
+
+  // Xray 配置
+  await generateConfig();
+
+  console.log(
+    'Xray config generated'
+  );
+
+  // Nezha
+  await runNezha();
+
+  // HTTP 订阅服务
+  startSubscriptionServer();
+
+  // Xray + Cloudflare
+  await runServices();
+
+  // 获取节点域名
+  await extractDomains();
+
+  // 上传
+  await uploadFiles();
+
+  // 自动访问
+  await autoAccess();
+
+  // Telegram
+  if (
+    BOT_TOKEN &&
+    CHAT_ID
+  ) {
+
+    await sendTelegram(
+      `XHTTP node deployed successfully\n\nDomain: ${ARGO_DOMAIN || 'Quick Tunnel'}\nPort: ${ARGO_PORT}\nMode: packet-up`
+    );
+  }
+
+  console.log(
+    '============================================'
+  );
+
+  console.log(
+    'Deployment completed'
+  );
+
+  console.log(
+    '============================================'
+  );
+
+  // =====================================================
+  // 注意：
+  // 不立即删除 config.json。
+  // 保证 Xray 服务持续使用。
+  // =====================================================
+}
+
+// ==================== 异常处理 ====================
+
+process.on(
+  'uncaughtException',
   error => {
 
     console.error(
-      'Unhandled error in startserver:',
+      'Uncaught exception:',
       error
     );
   }
 );
 
-// 创建 http 服务器
-const server =
-  http.createServer(
-    async (req, res) => {
+process.on(
+  'unhandledRejection',
+  error => {
 
-      const urlPath =
-        req.url.split('?')[0];
-
-      // 订阅路由
-      if (
-        urlPath === `/${SUB_PATH}`
-      ) {
-
-        if (
-          subContent
-        ) {
-
-          res.writeHead(
-            200,
-            {
-              'Content-Type':
-                'text/plain; charset=utf-8'
-            }
-          );
-
-          res.end(
-            subContent
-          );
-
-        } else {
-
-          try {
-
-            const fileContent =
-              fs.readFileSync(
-                subPath,
-                'utf-8'
-              );
-
-            res.writeHead(
-              200,
-              {
-                'Content-Type':
-                  'text/plain; charset=utf-8'
-              }
-            );
-
-            res.end(
-              fileContent
-            );
-
-          } catch (err) {
-
-            res.writeHead(
-              503,
-              {
-                'Content-Type':
-                  'text/plain; charset=utf-8'
-              }
-            );
-
-            res.end(
-              'Subscription content not yet available, please try again later.'
-            );
-          }
-        }
-
-        return;
-      }
-
-      // 根路由: /
-      if (
-        urlPath === '/'
-      ) {
-
-        try {
-
-          const filePath =
-            path.join(
-              __dirname,
-              'index.html'
-            );
-
-          const data =
-            await fs.promises.readFile(
-              filePath,
-              'utf8'
-            );
-
-          res.writeHead(
-            200,
-            {
-              'Content-Type':
-                'text/html; charset=utf-8'
-            }
-          );
-
-          res.end(
-            data
-          );
-
-        } catch (err) {
-
-          res.writeHead(
-            200,
-            {
-              'Content-Type':
-                'text/html; charset=utf-8'
-            }
-          );
-
-          res.end(
-            "Hello world!<br><br>You can access /{SUB_PATH}(Default: /sub) to get your nodes!"
-          );
-        }
-
-        return;
-      }
-
-      res.writeHead(
-        404,
-        {
-          'Content-Type':
-            'text/plain; charset=utf-8'
-        }
-      );
-
-      res.end(
-        'Not Found'
-      );
-    }
-  );
-
-server.listen(
-  PORT,
-  () =>
-    alwaysLog(
-      `http server is running on ${PORT}!`
-    )
+    console.error(
+      'Unhandled rejection:',
+      error
+    );
+  }
 );
+
+// ==================== 启动 ====================
+
+main()
+  .catch(error => {
+
+    console.error(
+      'Main process error:',
+      error
+    );
+
+    process.exit(1);
+  });
