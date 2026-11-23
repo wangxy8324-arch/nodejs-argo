@@ -19,8 +19,8 @@ const UUID = process.env.UUID || 'a63288ee-6973-4f68-94dd-17c231e1bafa'; // 使�
 const NEZHA_SERVER = process.env.NEZHA_SERVER || '';        // 哪吒v1填写形式: nz.abc.com:8008  哪吒v0填写形式：nz.abc.com
 const NEZHA_PORT = process.env.NEZHA_PORT || '';            // 使用哪吒v1请留空，哪吒v0需填写
 const NEZHA_KEY = process.env.NEZHA_KEY || '';              // 哪吒v1的NZ_CLIENT_SECRET或哪吒v0的agent密钥
-const ARGO_DOMAIN = process.env.ARGO_DOMAIN || 'back4.723207.xyz';          // 固定隧道域名,留空即启用临时隧道
-const ARGO_AUTH = process.env.ARGO_AUTH || 'eyJhIjoiMjg3NjVhODMwYmI1ZmIzYzYzMGFkMTVmZDA5MzYxZDciLCJ0IjoiZWI1MDhiMjUtY2EwMS00OGM0LTg4NTgtNzJhYWE4OGJhY2Y4IiwicyI6IjBxZExZUDE2Q051R044cGF2c0ZZSHNUc2praUp0N05XSDN6bTRWejZ2dzQ9In0=';              // 固定隧道密钥json或token,留空即启用临时隧道,json获取地址：https://json.zone.id
+const ARGO_DOMAIN = process.env.ARGO_DOMAIN || 'nod.723207.xyz';          // 固定隧道域名,留空即启用临时隧道
+const ARGO_AUTH = process.env.ARGO_AUTH || 'eyJhIjoiMjg3NjVhODMwYmI1ZmIzYzYzMGFkMTVmZDA5MzYxZDciLCJ0IjoiN2NlNTJkOGUtZTM2Yy00YmQ3LTk5NmEtOGFhZWQ4ZTczOGZjIiwicyI6IjRSWTBwV1lHVHZIMzl5elVxb1RjSXFRcGNtaFcvVWdldjdFZ3FyUmE3V0E9In0=';              // 固定隧道密钥json或token,留空即启用临时隧道,json获取地址：https://json.zone.id
 const ARGO_PORT = process.env.ARGO_PORT || 8001;            // 固定隧道端口,使用token需在cloudflare后台设置和这里一致
 const S5_PORT = process.env.S5_PORT || '';                  // socks5端口，支持多端口的可以填写，否则留空
 const HY2_PORT = process.env.HY2_PORT || '';                // hy2端口，支持多端口的可以填写，否则留空
